@@ -1,0 +1,6 @@
+# Secrets and local artifacts — never commit
+.env
+*.env
+node_modules/
+supabase/.temp/
+.DS_Store
