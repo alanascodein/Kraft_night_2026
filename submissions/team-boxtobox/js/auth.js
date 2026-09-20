@@ -76,6 +76,23 @@
     });
   }
 
+  // ---- Help the browser offer to save the login ----------------------------
+  // Because sign-in is async (no real form submission), Chrome sometimes misses
+  // the "Save password?" moment. The Credential Management API makes the bubble
+  // reliable where supported (Chrome/Edge); Firefox/Safari simply skip it.
+  function offerSavePassword(email, password) {
+    try {
+      if (!window.PasswordCredential || !navigator.credentials?.store) return;
+      const stored = navigator.credentials
+        .store(new PasswordCredential({ id: email, password }))
+        .catch(() => {});
+      // Never let the save bubble delay the dashboard for more than 2.5 s.
+      return Promise.race([stored, new Promise((r) => setTimeout(r, 2500))]);
+    } catch {
+      /* unsupported — the browser falls back to its own heuristics */
+    }
+  }
+
   // ---- Sign in ------------------------------------------------------------
   $("login-form").addEventListener("submit", async (e) => {
     e.preventDefault();
@@ -89,6 +106,7 @@
       const { error } = await client.auth.signInWithPassword({ email, password });
       if (error) throw error;
       setStatus("Signed in! Opening your dashboard…", "success");
+      await offerSavePassword(email, password);
       location.href = nextUrl();
     } catch (err) {
       setBusy($("login-btn"), false, "", "Sign in");

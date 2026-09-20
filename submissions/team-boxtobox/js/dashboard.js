@@ -401,60 +401,134 @@
   });
 
   // ==========================================================================
-  // RESOURCES — rule-based matching (grouping needs by type + area)
+  // RESOURCES — needs (rule-based matching) + surplus offers from farmers
   // ==========================================================================
   async function loadResources() {
-    const { data: needs, error } = await client
-      .from("resource_needs").select("*").order("created_at", { ascending: false }).limit(100);
+    const [{ data: needs, error }, { data: offers, error: oerr }] = await Promise.all([
+      client.from("resource_needs").select("*").order("created_at", { ascending: false }).limit(100),
+      client.from("resource_offers").select("*").order("created_at", { ascending: false }).limit(100),
+    ]);
+
     const box = $("resources-list");
-    if (error) { box.innerHTML = `<div class="alert">Could not load needs: ${esc(error.message)}</div>`; return; }
-    if (!needs?.length) {
+    if (error) {
+      box.innerHTML = `<div class="alert">Could not load needs: ${esc(error.message)}</div>`;
+    } else if (!needs?.length) {
       box.innerHTML = `<div class="empty"><span class="icon">🚜</span>No needs posted yet.</div>`;
+    } else {
+      // RULE: count needs with same resource_type + area (excluding own)
+      const counts = {};
+      needs.forEach((n) => {
+        const key = `${n.resource_type}|${(n.area ?? "").toLowerCase()}`;
+        counts[key] = (counts[key] ?? 0) + 1;
+      });
+      // Cross-match: is someone in the same area already OFFERING this type?
+      const offerCounts = {};
+      (offers ?? []).forEach((o) => {
+        if (o.status !== "available") return;
+        const key = `${o.item_type}|${(o.area ?? "").toLowerCase()}`;
+        offerCounts[key] = (offerCounts[key] ?? 0) + 1;
+      });
+
+      box.innerHTML = needs.map((n) => {
+        const key = `${n.resource_type}|${(n.area ?? "").toLowerCase()}`;
+        const matching = counts[key];
+        const matchHint = matching >= 2
+          ? `<div class="alert blue" style="margin:.6rem 0 0">
+               <strong>🤝 ${matching} farmers in ${esc(n.area)} need this too!</strong>
+               <span class="small">Suggested: coordinate procurement or shared use together.</span>
+             </div>`
+          : "";
+        const off = offerCounts[key];
+        const offerHint = off
+          ? `<div class="alert" style="margin:.6rem 0 0;background:#eef7ee;border-color:#bcd9bc">
+               <strong>🎁 ${off} farmer${off > 1 ? "s" : ""} nearby ${off > 1 ? "are" : "is"} offering this type — check below before buying new!</strong>
+             </div>`
+          : "";
+        return `
+        <div class="card" style="margin-bottom:.8rem">
+          <div style="display:flex;justify-content:space-between;gap:1rem;flex-wrap:wrap;align-items:center">
+            <div>
+              <strong>${esc(n.resource_type)}</strong>
+              <span class="small muted">· 📍 ${esc(n.area)} · ${fmtDate(n.created_at)}${n.farmer_id === userId ? " · you" : ""}</span>
+              ${n.note ? `<p class="small" style="margin:.3rem 0 0">${esc(n.note)}</p>` : ""}
+            </div>
+          </div>
+          ${matchHint}
+          ${offerHint}
+        </div>`;
+      }).join("");
+    }
+    renderOffers(offers, oerr);
+  }
+
+  function renderOffers(offers, oerr) {
+    const box = $("offers-list");
+    if (!box) return;
+    if (oerr) { box.innerHTML = `<div class="alert">Could not load offers: ${esc(oerr.message)}</div>`; return; }
+    if (!offers?.length) {
+      box.innerHTML = `<div class="empty"><span class="icon">🎁</span>Nothing shared yet. Leftover fertilizer or extra seeds? Share it above.</div>`;
       return;
     }
-
-    // RULE: count needs with same resource_type + area (excluding own)
-    const counts = {};
-    needs.forEach((n) => {
-      const key = `${n.resource_type}|${(n.area ?? "").toLowerCase()}`;
-      counts[key] = (counts[key] ?? 0) + 1;
-    });
-
-    const { data: { user } } = await client.auth.getUser();
-    box.innerHTML = needs.map((n) => {
-      const key = `${n.resource_type}|${(n.area ?? "").toLowerCase()}`;
-      const matching = counts[key];
-      const matchHint = matching >= 2
-        ? `<div class="alert blue" style="margin:.6rem 0 0">
-             <strong>🤝 ${matching} farmers in ${esc(n.area)} need this too!</strong>
-             <span class="small">Suggested: coordinate procurement or shared use together.</span>
-           </div>`
-        : "";
+    box.innerHTML = offers.map((o) => {
+      const mine = o.owner_id === userId;
+      const free = Number(o.price) === 0;
+      const priceTag = free
+        ? `<span class="badge" style="background:#e3f4e3;color:#1c6b2f">🌿 Free to share</span>`
+        : `<span class="badge badge-ai">₹${esc(o.price)} / ${esc(o.unit)}</span>`;
+      const shared = o.status === "shared"
+        ? `<span class="badge">✅ Shared</span>` : "";
       return `
-      <div class="card" style="margin-bottom:.8rem">
-        <div style="display:flex;justify-content:space-between;gap:1rem;flex-wrap:wrap;align-items:center">
+      <div class="card" style="margin-bottom:.8rem;${o.status === "shared" ? "opacity:.75" : ""}">
+        <div style="display:flex;justify-content:space-between;gap:1rem;flex-wrap:wrap;align-items:flex-start">
           <div>
-            <strong>${esc(n.resource_type)}</strong>
-            <span class="small muted">· 📍 ${esc(n.area)} · ${fmtDate(n.created_at)}${n.farmer_id === user.id ? " · you" : ""}</span>
-            ${n.note ? `<p class="small" style="margin:.3rem 0 0">${esc(n.note)}</p>` : ""}
+            <strong>${esc(o.item_name)}</strong> ${priceTag} ${shared}
+            <div class="small muted" style="margin-top:.2rem">
+              ${esc(o.item_type)} · ${esc(o.quantity)} ${esc(o.unit)} · 📍 ${esc(o.area)} · by ${esc(o.owner_name)} · ${fmtDate(o.created_at)}
+            </div>
+            ${o.contact ? `<div class="small">📞 ${esc(o.contact)}</div>` : ""}
+            ${o.note ? `<p class="small" style="margin:.3rem 0 0">${esc(o.note)}</p>` : ""}
           </div>
+          ${mine ? `
+          <div style="display:flex;gap:.5rem;flex-wrap:wrap">
+            ${o.status === "available" ? `<button class="btn btn-secondary" data-offer-done="${o.id}">Mark as shared</button>` : ""}
+            <button class="btn btn-ghost" data-offer-del="${o.id}">Remove</button>
+          </div>` : ""}
         </div>
-        ${matchHint}
       </div>`;
     }).join("");
   }
 
-  $("resource-form")?.addEventListener("submit", async (e) => {
+  // Mark shared / remove (event delegation on the offers list)
+  $("offers-list")?.addEventListener("click", async (e) => {
+    const doneBtn = e.target.closest("[data-offer-done]");
+    const delBtn = e.target.closest("[data-offer-del]");
+    if (doneBtn) {
+      const { error } = await client.from("resource_offers").update({ status: "shared" }).eq("id", doneBtn.dataset.offerDone);
+      toast(error ? "Could not update." : "✅ Marked as shared. Thanks for helping a neighbour!", !!error);
+      if (!error) loadResources();
+    } else if (delBtn) {
+      const { error } = await client.from("resource_offers").delete().eq("id", delBtn.dataset.offerDel);
+      toast(error ? "Could not remove." : "Offer removed.", !!error);
+      if (!error) loadResources();
+    }
+  });
+
+  $("offer-form")?.addEventListener("submit", async (e) => {
     e.preventDefault();
-    const { data: { user } } = await client.auth.getUser();
-    const { error } = await client.from("resource_needs").insert({
-      farmer_id: user.id,
-      resource_type: $("res-type").value,
-      area: $("res-area").value.trim(),
-      note: $("res-note").value.trim() || null,
+    const { error } = await client.from("resource_offers").insert({
+      owner_id: userId,
+      owner_name: myName,
+      item_name: $("off-name").value.trim(),
+      item_type: $("off-type").value,
+      quantity: Number($("off-qty").value),
+      unit: $("off-unit").value,
+      price: Number($("off-price").value || 0),
+      area: $("off-area").value.trim(),
+      contact: $("off-contact").value.trim() || null,
+      note: $("off-note").value.trim() || null,
     });
-    toast(error ? "Could not post need." : "✅ Need posted — checking for matches…", !!error);
-    if (!error) { e.target.reset(); loadResources(); }
+    toast(error ? "Could not share item: " + (error.message || "") : "🎁 Shared! Nearby farmers can see it now.", !!error);
+    if (!error) { e.target.reset(); $("off-price").value = 0; loadResources(); }
   });
 
   // ==========================================================================
@@ -506,7 +580,40 @@
   // OFFICER — home page, review queue, and rule-based risk signals
   // ==========================================================================
 
-  // Rule: same crop + first symptom + area within 7 days, >= 3 reports.
+  // Rule: same crop + similar symptom + area within 7 days, >= 3 reports.
+  // Symptoms are matched by word overlap, so "brown spots on leaves" and
+  // "brown spots on the leaf" (same meaning, different words) still group.
+  const SYMP_SKIP = new Set(
+    ["a","an","and","are","at","by","for","from","in","is","it","its","of",
+     "on","or","the","to","with","as","be","been","was","were"]);
+
+  function symStem(w) {
+    if (w.length > 5 && w.endsWith("ing")) return w.slice(0, -3);
+    if (w.length > 3 && w.endsWith("ies")) return w.slice(0, -3) + "y";
+    if (w.length > 3 && w.endsWith("es")) return w.slice(0, -2);
+    if (w.length > 3 && w.endsWith("ed")) return w.slice(0, -1);
+    if (w.length > 3 && w.endsWith("s")) return w.slice(0, -1);
+    return w;
+  }
+
+  function symWords(sym) {
+    return new Set(
+      String(sym || "")
+        .toLowerCase()
+        .replace(/[^a-z0-9\s]/g, " ")
+        .split(/\s+/)
+        .map(symStem)
+        .filter((w) => w.length >= 3 && !SYMP_SKIP.has(w)));
+  }
+
+  function symSimilar(a, b) {
+    const wa = symWords(a), wb = symWords(b);
+    if (!wa.size || !wb.size) return String(a).trim().toLowerCase() === String(b).trim().toLowerCase();
+    let inter = 0;
+    wa.forEach((w) => { if (wb.has(w)) inter++; });
+    return (2 * inter) / (wa.size + wb.size) >= 0.5;
+  }
+
   async function computeSignals() {
     const since = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
     const [{ data: recent }, { data: saved }] = await Promise.all([
@@ -514,22 +621,37 @@
       client.from("risk_patterns").select("*").order("created_at", { ascending: false }).limit(30),
     ]);
 
-    const counts = {};
+    // Group by crop + area first, then cluster similar symptoms inside.
+    const buckets = new Map();
     (recent ?? []).forEach((r) => {
       if (!r.crop || !r.area) return;
       const sym = (r.symptoms ?? [])[0] ?? "unspecified";
-      const key = `${r.crop.toLowerCase()}|${sym.toLowerCase()}|${r.area.toLowerCase()}`;
-      (counts[key] ??= []).push(r);
+      const bkey = `${r.crop.toLowerCase()}|${r.area.toLowerCase()}`;
+      if (!buckets.has(bkey)) buckets.set(bkey, []);
+      buckets.get(bkey).push({ r, sym });
+    });
+
+    const clusters = [];
+    buckets.forEach((items, bkey) => {
+      const [crop, area] = bkey.split("|");
+      const groups = [];
+      items.forEach(({ r, sym }) => {
+        let g = groups.find((g) => symSimilar(g.symptom, sym));
+        if (!g) { g = { symptom: sym, reports: [] }; groups.push(g); }
+        g.reports.push(r);
+      });
+      groups.forEach((g) => {
+        if (g.reports.length >= 3) clusters.push({ crop, area, symptom: g.symptom, reports: g.reports });
+      });
     });
 
     // A dismissed (rejected) signal stays hidden until NEW reports arrive.
-    const rejectedKeys = new Set(
-      (saved ?? []).filter((p) => p.status === "rejected")
-        .map((p) => `${p.crop.toLowerCase()}|${p.symptom.toLowerCase()}|${p.area.toLowerCase()}`));
-
-    return Object.entries(counts)
-      .filter(([, arr]) => arr.length >= 3)
-      .filter(([key]) => !rejectedKeys.has(key));
+    const rejected = (saved ?? []).filter((p) => p.status === "rejected");
+    return clusters.filter((c) =>
+      !rejected.some((p) =>
+        p.crop.toLowerCase() === c.crop &&
+        p.area.toLowerCase() === c.area &&
+        symSimilar(p.symptom, c.symptom)));
   }
 
   // ---- Officer home page: stats + latest unverified reports
@@ -572,19 +694,18 @@
     if (!signals.length) {
       riskBox.innerHTML = `<div class="empty"><span class="icon">🌤️</span>No risk patterns detected in the last 7 days.</div>`;
     } else {
-      riskBox.innerHTML = signals.map(([key, arr]) => {
-        const [crop, sym, area] = key.split("|");
-        const fired = `Rule fired: ${arr.length} reports of "${sym}" on ${crop} in ${area} within 7 days.`;
+      riskBox.innerHTML = signals.map(({ crop, area, symptom, reports }) => {
+        const fired = `Rule fired: ${reports.length} reports of "${symptom}" on ${crop} in ${area} within 7 days.`;
         return `
         <div class="alert">
-          <strong>🚨 ${arr.length} similar reports — ${esc(crop)}, "${esc(sym)}" in ${esc(area)}</strong>
-          <span class="small">${esc(fired)} Latest: ${fmtDate(arr[arr.length - 1].created_at)}</span>
+          <strong>🚨 ${reports.length} similar reports — ${esc(crop)}, "${esc(symptom)}" in ${esc(area)}</strong>
+          <span class="small">${esc(fired)} Latest: ${fmtDate(reports[reports.length - 1].created_at)}</span>
           <div style="margin-top:.6rem;display:flex;gap:.6rem;flex-wrap:wrap">
-            <button class="btn btn-primary confirm-pattern" data-key="${esc(key)}"
-              data-crop="${esc(crop)}" data-sym="${esc(sym)}" data-area="${esc(area)}" data-count="${arr.length}">
+            <button class="btn btn-primary confirm-pattern" data-key="${esc(`${crop}|${symptom}|${area}`)}"
+              data-crop="${esc(crop)}" data-sym="${esc(symptom)}" data-area="${esc(area)}" data-count="${reports.length}">
               ✅ Confirm & alert community
             </button>
-            <button class="btn btn-ghost dismiss-pattern" data-key="${esc(key)}">Dismiss</button>
+            <button class="btn btn-ghost dismiss-pattern" data-key="${esc(`${crop}|${symptom}|${area}`)}">Dismiss</button>
           </div>
         </div>`;
       }).join("");

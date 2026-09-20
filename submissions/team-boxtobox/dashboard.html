@@ -281,7 +281,7 @@
     <!-- ============================ RESOURCES ============================ -->
     <section class="wizard-step" id="tab-resources">
       <h2>Shared resources</h2>
-      <p class="muted">Post what you need. When nearby farmers need the same thing, we suggest coordinating together.</p>
+      <p class="muted">Post what you need — or share what you have left over. When nearby farmers need the same thing, we suggest coordinating together.</p>
 
       <div class="card" style="margin:1rem 0">
         <h3>Post a need</h3>
@@ -310,8 +310,70 @@
         </form>
       </div>
 
+      <div class="card" style="margin:1rem 0">
+        <h3>🎁 Have something left over? Share or sell it</h3>
+        <p class="muted small">Bought 10 kg of fertilizer but used only 8? Offer the rest to a neighbour instead of letting it sit until next season.</p>
+        <form id="offer-form">
+          <div class="field-row">
+            <div>
+              <label for="off-name">Item</label>
+              <input type="text" id="off-name" placeholder="e.g. Urea fertilizer (unopened)" required>
+            </div>
+            <div>
+              <label for="off-type">Category</label>
+              <select id="off-type" required>
+                <option value="">Choose…</option>
+                <option>Fertilizers &amp; inputs</option>
+                <option>Seeds</option>
+                <option>Pesticides</option>
+                <option>Irrigation equipment</option>
+                <option>Agricultural machinery</option>
+                <option>Transport</option>
+                <option>Other</option>
+              </select>
+            </div>
+          </div>
+          <div class="field-row" style="grid-template-columns:1fr 1fr 1fr">
+            <div>
+              <label for="off-qty">Quantity</label>
+              <input type="number" id="off-qty" min="0.1" step="any" placeholder="e.g. 2" required>
+            </div>
+            <div>
+              <label for="off-unit">Unit</label>
+              <select id="off-unit">
+                <option>kg</option>
+                <option>litres</option>
+                <option>bags</option>
+                <option>packets</option>
+                <option>pieces</option>
+              </select>
+            </div>
+            <div>
+              <label for="off-price">Price per unit (₹)</label>
+              <input type="number" id="off-price" min="0" step="any" placeholder="0 = free" value="0">
+            </div>
+          </div>
+          <div class="field-row">
+            <div>
+              <label for="off-area">Your panchayat / locality</label>
+              <input type="text" id="off-area" required>
+            </div>
+            <div>
+              <label for="off-contact">Contact <span class="opt">(phone / WhatsApp, optional)</span></label>
+              <input type="text" id="off-contact" placeholder="e.g. 98470 00000">
+            </div>
+          </div>
+          <label for="off-note">Details <span class="opt">(optional)</span></label>
+          <input type="text" id="off-note" placeholder="e.g. opened bag, stored dry — pickup from my farm">
+          <button class="btn btn-primary" style="margin-top:1rem">Share this</button>
+        </form>
+      </div>
+
       <h3 class="mt">Needs & matches</h3>
       <div id="resources-list"></div>
+
+      <h3 class="mt">🎁 Surplus & offers from farmers nearby</h3>
+      <div id="offers-list"></div>
     </section>
 
     <!-- ============================ KNOWLEDGE ============================ -->

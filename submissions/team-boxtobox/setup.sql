@@ -78,11 +78,19 @@ create table if not exists public.farmer_reports (
   area          text,                 -- approximate: panchayat or locality
   status        text not null default 'unverified'
                 check (status in ('unverified', 'verified', 'rejected')),
+  review_note   text,                 -- officer's reply after reviewing the report
+  reviewed_by   uuid references auth.users(id) on delete set null,
+  reviewed_at   timestamptz,
   created_at    timestamptz not null default now()
 );
 
 create index if not exists farmer_reports_match_idx
   on public.farmer_reports (crop, area, created_at desc);
+
+-- Upgrade databases created before officer replies existed (safe to re-run)
+alter table public.farmer_reports add column if not exists review_note  text;
+alter table public.farmer_reports add column if not exists reviewed_by  uuid references auth.users(id) on delete set null;
+alter table public.farmer_reports add column if not exists reviewed_at  timestamptz;
 
 alter table public.farmer_reports enable row level security;
 
@@ -433,6 +441,51 @@ begin
 exception
   when duplicate_object then null;  -- already added
 end $$;
+
+-- ============================================================================
+-- 10. RESOURCE OFFERS (farmers share/sell UNUSED surplus — leftover fertilizer,
+--     extra seeds, spare equipment — instead of letting it sit idle)
+-- ============================================================================
+create table if not exists public.resource_offers (
+  id         uuid primary key default gen_random_uuid(),
+  owner_id   uuid not null references auth.users(id) on delete cascade,
+  owner_name text not null default 'Farmer',
+  item_name  text not null check (char_length(item_name) between 1 and 120),
+  item_type  text not null,
+  quantity   numeric not null check (quantity > 0),
+  unit       text not null default 'kg',
+  price      numeric not null default 0 check (price >= 0),  -- 0 = share for free
+  area       text not null,
+  contact    text,                                           -- optional phone / WhatsApp
+  note       text,
+  status     text not null default 'available' check (status in ('available','shared')),
+  created_at timestamptz not null default now()
+);
+
+create index if not exists resource_offers_area_idx
+  on public.resource_offers (area, created_at desc);
+
+alter table public.resource_offers enable row level security;
+
+drop policy if exists "offers readable" on public.resource_offers;
+create policy "offers readable"
+  on public.resource_offers for select to authenticated using (true);
+
+drop policy if exists "farmers post offers" on public.resource_offers;
+create policy "farmers post offers"
+  on public.resource_offers for insert to authenticated
+  with check (owner_id = auth.uid());
+
+drop policy if exists "owners update own offers" on public.resource_offers;
+create policy "owners update own offers"
+  on public.resource_offers for update to authenticated
+  using (owner_id = auth.uid())
+  with check (owner_id = auth.uid());
+
+drop policy if exists "owners delete own offers" on public.resource_offers;
+create policy "owners delete own offers"
+  on public.resource_offers for delete to authenticated
+  using (owner_id = auth.uid());
 
 -- ============================================================================
 -- DONE ✅
